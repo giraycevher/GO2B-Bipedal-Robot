@@ -1,5 +1,6 @@
 # GO2B: 12-DOF Bipedal Technology Demonstrator
-A high-fidelity bipedal robotics platform featuring ZMP-based trajectory planning and MuJoCo simulation.
+A high-fidelity bipedal robotics platform featuring ZMP-based trajectory planning and MuJoCo simulation.  
+
 Özgür Hakkı Ünver, Bahram Lotfi , Giray Cevher Eser, Ozan Ecevit  
 
 
