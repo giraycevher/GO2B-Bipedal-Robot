@@ -28,6 +28,8 @@ Simulation: MuJoCo Physics Engine (robot_v2.xml)
 Control Theory: ZMP Preview Control (LQR/MPC)
 
 Kinematics: 12-DOF Inverse Kinematics (IK)
+### Kinematic Configuration
+![GO2B Robot Mechanism](assets/v2_robot_structure.jpg)
 
 Interfacing: Python (Simulation & Control Loops) / MATLAB (Trajectory Optimization)
 
