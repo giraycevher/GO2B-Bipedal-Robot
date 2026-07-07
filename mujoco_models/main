@@ -1,0 +1,199 @@
+import mujoco
+import mujoco.viewer
+import numpy as np
+import time
+import math
+import matplotlib.pyplot as plt  # Grafikler için
+
+
+from robot_utils import DynamicStepPlanner
+from kinematic import IK_leg
+from preview_control import init_preview_control
+
+
+model = mujoco.MjModel.from_xml_path("robot_v2.xml")
+data = mujoco.MjData(model)
+
+A_leg, B_leg = 0.2, 0.2
+
+dt_mpc = 0.01
+z_c = 0.31
+N_preview = 400
+
+step_time = 70 #second
+inital_delay = 50
+step_height = 0.04
+MAX_SIM_TIME = 10.0
+MAX_SIM_TIME = 10.0
+dx = 0.08
+D_left, D_right = 0.05, -0.05
+
+footstep = np.array([
+    [0.00, D_left, 0.0],
+    [dx, D_right, 0.0],
+    [dx * 2, D_left, 0.0],
+    [dx * 3, D_right, 0.0],
+    [dx * 4, D_left, 0.0],
+    [dx * 5, D_right, 0.0],
+    [dx * 6, D_left, 0.0],
+    [dx * 7, D_right, 0.0],
+    [dx * 8, D_left, 0.0],
+    [dx * 9, D_right, 0.0],
+    [dx * 10, D_left, 0.0],
+    [dx * 11, D_right, 0.0],
+    [dx * 12, D_left, 0.0],
+    [dx * 13, D_right, 0.0],
+    [dx * 14, D_left, 0.0],
+    [dx * 15, D_right, 0.0],
+    [dx * 16, D_left, 0.0],
+    [dx * 17, D_right, 0.0],
+    [dx * 18, D_left, 0.0],
+    [dx * 19, D_right, 0.0]
+])
+
+Ks, Kx, F_preview, sys_A, sys_B, sys_C = init_preview_control(dt_mpc, z_c, N_preview)
+planner = DynamicStepPlanner(footstep, step_time, inital_delay)
+
+#Graph
+log_t = []
+log_real_com_x = []
+log_real_com_y = []
+log_planned_com_x = []
+log_planned_com_y = []
+
+
+govde_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+
+#  SIM LOOP
+with mujoco.viewer.launch_passive(model, data) as viewer:
+  
+    starting_time = time.time()
+
+    state_x, state_y = np.zeros(3), np.zeros(3)
+    sum_e_x, sum_e_y = 0.0, 0.0
+
+    foot_L_pos, foot_R_pos = np.array([0.0, D_left, 0.02]), np.array([0.0, D_right, 0.02])
+    step_verif = False
+    step_index, sim_counter = 0, 0
+    steping_x_left = steping_x_right = 0.0
+    steping_y_left, steping_y_right = D_left, D_right
+    target_x_left = target_x_right = 0.0
+    target_y_left, target_y_right = D_left, D_right
+    foot_air = 'No'
+
+    while viewer.is_running() and (time.time() - starting_time) < MAX_SIM_TIME:
+        lasting_time = time.time() - starting_time
+
+        # External PUSH
+        if 6.0 < lasting_time < 6.1:
+            data.xfrc_applied[govde_id, 1] = 30.0 #
+        else:
+            data.xfrc_applied[govde_id, 1] = 0.0
+
+        #Squat
+        target_z = z_c
+        if lasting_time < 2.0:
+            #Squat
+            target_z = 0.40 - ((0.40 - z_c) * (lasting_time / 2.0))
+        elif not step_verif:
+            step_verif = True
+
+        # Preview Control
+        if step_verif and sim_counter % 3 == 0:
+            p_real_y = (sys_C @ state_y).item()
+            sum_e_y += p_real_y - planner.p_ref_y[min(step_index, 19999)]
+            future_ref_y = sum(F_preview[j] * planner.p_ref_y[min(step_index + j, 19999)] for j in range(N_preview))
+            state_y = sys_A @ state_y + sys_B * (-Ks * sum_e_y - (Kx @ state_y).item() - future_ref_y)
+
+            p_real_x = (sys_C @ state_x).item()
+            sum_e_x += p_real_x - planner.p_ref_x[min(step_index, 19999)]
+            future_ref_x = sum(F_preview[j] * planner.p_ref_x[min(step_index + j, 19999)] for j in range(N_preview))
+            state_x = sys_A @ state_x + sys_B * (-Ks * sum_e_x - (Kx @ state_x).item() - future_ref_x)
+
+            if step_index >= inital_delay:
+                real_step_time = step_index - inital_delay
+                step_ici_time = real_step_time % step_time
+                target_x, target_y, left_mu = planner.swing_target(step_index, state_x, state_y)
+
+                if step_ici_time == 0:
+                    steping_x_left, steping_x_right = foot_L_pos[0], foot_R_pos[0]
+                    steping_y_left, steping_y_right = foot_L_pos[1], foot_R_pos[1]
+                    foot_air = 'left' if left_mu else 'right'
+
+                if left_mu:
+                    target_x_left, target_y_left = target_x, target_y
+                else:
+                    target_x_right, target_y_right = target_x, target_y
+
+                faz = (step_ici_time / float(step_time)) * math.pi
+                t_lerp = (1 - math.cos(faz)) / 2.0
+
+                if foot_air == 'left':
+                    foot_L_pos[0] = steping_x_left + (target_x_left - steping_x_left) * t_lerp
+                    foot_L_pos[1] = steping_y_left + (target_y_left - steping_y_left) * t_lerp
+                    foot_L_pos[2] = 0.02 + step_height * math.sin(faz)
+                elif foot_air == 'right':
+                    foot_R_pos[0] = steping_x_right + (target_x_right - steping_x_right) * t_lerp
+                    foot_R_pos[1] = steping_y_right + (target_y_right - steping_y_right) * t_lerp
+                    foot_R_pos[2] = 0.02 + step_height * math.sin(faz)
+
+            step_index += 1
+
+        #Inverse Kinematic
+        try:
+            CoM = np.array([state_x[0], state_y[0], target_z])
+            left_acilar = IK_leg(CoM, np.eye(3), D_left, A_leg, B_leg, foot_L_pos, np.eye(3))
+            right_acilar = IK_leg(CoM, np.eye(3), D_right, A_leg, B_leg, foot_R_pos, np.eye(3))
+            data.ctrl[:6] = left_acilar
+            data.ctrl[6:12] = right_acilar
+        except:
+            pass
+
+        sim_counter += 1
+        mujoco.mj_step(model, data)
+        viewer.sync()
+
+        # Sensor Log
+        log_t.append(lasting_time)
+
+        
+        real_com_x = data.sensor('com_pos').data[0]
+        real_com_y = data.sensor('com_pos').data[1]
+
+        log_real_com_x.append(real_com_x)
+        log_real_com_y.append(real_com_y)
+
+        log_planned_com_x.append(state_x[0])
+        log_planned_com_y.append(state_y[0])
+
+        time.sleep(0.002)
+
+
+
+
+
+plt.figure(figsize=(12, 6))
+
+# X Axis
+plt.subplot(2, 1, 1)
+#plt.plot(log_t, log_planned_com_x, label="Planned CoM X (MPC)", linestyle="--", color="blue")
+plt.plot(log_t, log_real_com_x, label="Measured CoM X (Sensor)", linewidth=2, color="red")
+plt.axvline(x=6.0, color='black', linestyle=':', label='Push')
+plt.title("X axis: CoM Trajectory (Forward)")
+plt.ylabel("Position (m)")
+plt.legend()
+plt.grid(True)
+
+# Y Axis
+plt.subplot(2, 1, 2)
+#plt.plot(log_t, log_planned_com_y, label="Planned CoM Y (MPC)", linestyle="--", color="blue")
+plt.plot(log_t, log_real_com_y, label="Measured CoM Y ", linewidth=2, color="red")
+plt.axvline(x=6.0, color='black', linestyle=':', label='Push')
+plt.title("Y axis: CoM Trajectory  (Lateral)")
+plt.xlabel("Time (s)")
+plt.ylabel("Position (m)")
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
