@@ -1,7 +1,7 @@
 # GO2B: 12-DOF Bipedal Technology Demonstrator
 A high-fidelity bipedal robotics platform featuring ZMP-based trajectory planning and MuJoCo simulation.  
 
-Özgür Hakkı Ünver, Bahram Lotfi , Giray Cevher Eser, Ozan Ecevit  
+Özgür Hakkı Ünver, Bahram Lotfi , Ozan Ecevit , Giray Cevher Eser 
 
 
 
@@ -20,7 +20,7 @@ Sim-to-Real Architecture: Python-based control loops optimized for hardware inte
 
 Mechanical Design: 12-DOF bipedal leg system, designed and optimized for precision CNC manufacturing.
 
-GenAI Integration: Experimental autonomous visual route planning utilizing Gemini API for adaptive navigation.
+GenAI Integration: Experimental autonomous visual route planning utilizing Robotics-E.R 1.6 Gemini API for adaptive navigation.
 
 Technical Stack
 Simulation: MuJoCo Physics Engine (robot_v2.xml)
