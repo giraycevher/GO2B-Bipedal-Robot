@@ -1,5 +1,9 @@
 # GO2B: 12-DOF Bipedal Technology Demonstrator
 A high-fidelity bipedal robotics platform featuring ZMP-based trajectory planning and MuJoCo simulation.
+Özgür Hakkı Ünver, Bahram Lotfi , Giray Cevher Eser, Ozan Ecevit
+
+
+
 
 Institutional Acknowledgment
 The GO2B Bipedal Project was developed and prototyped within the System Dynamics and Control Laboratory at TOBB University of Economics and Technology (TOBB ETÜ). The integration of complex control algorithms with physical hardware was conducted under the academic and technical standards supported by the university's research infrastructure.
