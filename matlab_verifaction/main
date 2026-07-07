@@ -1,3 +1,6 @@
+
+% This code required https://github.com/ekorudiawan/ZMP-Preview-Control-WPG repository.
+
 clc; clear; close all;
 
 % Physical and control parameters
