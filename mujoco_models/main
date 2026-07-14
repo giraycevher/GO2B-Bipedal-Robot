@@ -3,31 +3,35 @@ import mujoco.viewer
 import numpy as np
 import time
 import math
-import matplotlib.pyplot as plt  # Grafikler için
+import matplotlib.pyplot as plt
 
+# Dosya isminin robot_utils.py olduğunu varsayıyoruz. 
+# Eğer hala "robot_utilis.py" ise import kısmını "robot_utilis" yapın.
+try:
+    from robot_utils import DynamicStepPlanner
+except ModuleNotFoundError:
+    from robot_utilis import DynamicStepPlanner
 
-from robot_utils import DynamicStepPlanner
 from kinematic import IK_leg
 from preview_control import init_preview_control
 
-
+# Model yükleme
 model = mujoco.MjModel.from_xml_path("robot_v2.xml")
 data = mujoco.MjData(model)
 
 A_leg, B_leg = 0.2, 0.2
-
 dt_mpc = 0.01
 z_c = 0.31
 N_preview = 400
 
-step_time = 70 #second
-inital_delay = 50
+step_time = 70           # 1 adımın süresi (adım döngüsü sayısı)
+inital_delay = 50        # Başlangıçtaki squat bekleme süresi
 step_height = 0.04
-MAX_SIM_TIME = 10.0
 MAX_SIM_TIME = 10.0
 dx = 0.08
 D_left, D_right = 0.05, -0.05
 
+# 20 Adımlık Yörünge
 footstep = np.array([
     [0.00, D_left, 0.0],
     [dx, D_right, 0.0],
@@ -51,30 +55,33 @@ footstep = np.array([
     [dx * 19, D_right, 0.0]
 ])
 
+# Kontrolör ve Planlayıcı İlklendirme
 Ks, Kx, F_preview, sys_A, sys_B, sys_C = init_preview_control(dt_mpc, z_c, N_preview)
 planner = DynamicStepPlanner(footstep, step_time, inital_delay)
 
-#Graph
+# Log listeleri
 log_t = []
 log_real_com_x = []
 log_real_com_y = []
 log_planned_com_x = []
 log_planned_com_y = []
 
-
 govde_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
 
-#  SIM LOOP
-with mujoco.viewer.launch_passive(model, data) as viewer:
-  
-    starting_time = time.time()
+# Fizik adımı senkronizasyon katsayısı
+sim_step_multiplier = max(1, int(dt_mpc / model.opt.timestep))
 
+# Ana Simülasyon Döngüsü
+with mujoco.viewer.launch_passive(model, data) as viewer:
+    starting_time = time.time()
     state_x, state_y = np.zeros(3), np.zeros(3)
     sum_e_x, sum_e_y = 0.0, 0.0
 
-    foot_L_pos, foot_R_pos = np.array([0.0, D_left, 0.02]), np.array([0.0, D_right, 0.02])
+    foot_L_pos = np.array([0.0, D_left, 0.02])
+    foot_R_pos = np.array([0.0, D_right, 0.02])
     step_verif = False
     step_index, sim_counter = 0, 0
+    
     steping_x_left = steping_x_right = 0.0
     steping_y_left, steping_y_right = D_left, D_right
     target_x_left = target_x_right = 0.0
@@ -82,23 +89,23 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
     foot_air = 'No'
 
     while viewer.is_running() and (time.time() - starting_time) < MAX_SIM_TIME:
+        step_start_time = time.time()
         lasting_time = time.time() - starting_time
 
-        # External PUSH
+        # 6. saniyede dışarıdan itme (Push Recovery Testi)
         if 6.0 < lasting_time < 6.1:
-            data.xfrc_applied[govde_id, 1] = 30.0 #
+            data.xfrc_applied[govde_id, 1] = 30.0  # Y ekseninde (yandan) itme kuvveti
         else:
             data.xfrc_applied[govde_id, 1] = 0.0
 
-        #Squat
+        # Başlangıç Çömelme (Squat) Hareketi
         target_z = z_c
         if lasting_time < 2.0:
-            #Squat
             target_z = 0.40 - ((0.40 - z_c) * (lasting_time / 2.0))
         elif not step_verif:
             step_verif = True
 
-        # Preview Control
+        # MPC Önizleme Kontrolü (ZMP Hesaplamaları)
         if step_verif and sim_counter % 3 == 0:
             p_real_y = (sys_C @ state_y).item()
             sum_e_y += p_real_y - planner.p_ref_y[min(step_index, 19999)]
@@ -110,6 +117,7 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
             future_ref_x = sum(F_preview[j] * planner.p_ref_x[min(step_index + j, 19999)] for j in range(N_preview))
             state_x = sys_A @ state_x + sys_B * (-Ks * sum_e_x - (Kx @ state_x).item() - future_ref_x)
 
+            # Adım Planlama ve Havada Süzülen Ayak Yörüngesi
             if step_index >= inital_delay:
                 real_step_time = step_index - inital_delay
                 step_ici_time = real_step_time % step_time
@@ -139,44 +147,48 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
 
             step_index += 1
 
-        #Inverse Kinematic
+        # Analitik Ters Kinematik (IK) Hesaplama ve Motor Kontrolü
         try:
             CoM = np.array([state_x[0], state_y[0], target_z])
             left_acilar = IK_leg(CoM, np.eye(3), D_left, A_leg, B_leg, foot_L_pos, np.eye(3))
             right_acilar = IK_leg(CoM, np.eye(3), D_right, A_leg, B_leg, foot_R_pos, np.eye(3))
+            
             data.ctrl[:6] = left_acilar
             data.ctrl[6:12] = right_acilar
-        except:
-            pass
+        except Exception as e:
+            # IK çözülemediğinde simülasyonun çökmesini engelleyip hatayı basar
+            print(f"[IK Hatası] Çözüm sınır dışı: {e}")
 
         sim_counter += 1
-        mujoco.mj_step(model, data)
+        
+        # Fizik motorunu MPC çözünürlüğüyle eşitlemek için sim_step_multiplier kadar adım koştur
+        for _ in range(sim_step_multiplier):
+            mujoco.mj_step(model, data)
+            
         viewer.sync()
 
-        # Sensor Log
+        # Verileri Logla
         log_t.append(lasting_time)
-
-        
-        real_com_x = data.sensor('com_pos').data[0]
-        real_com_y = data.sensor('com_pos').data[1]
-
-        log_real_com_x.append(real_com_x)
-        log_real_com_y.append(real_com_y)
+        try:
+            real_com_x = data.sensor('com_pos').data[0]
+            real_com_y = data.sensor('com_pos').data[1]
+            log_real_com_x.append(real_com_x)
+            log_real_com_y.append(real_com_y)
+        except Exception:
+            log_real_com_x.append(0.0)
+            log_real_com_y.append(0.0)
 
         log_planned_com_x.append(state_x[0])
         log_planned_com_y.append(state_y[0])
 
-        time.sleep(0.002)
+        # Gerçek zamanlı akış kontrolü (0.01 sn mpc dt'sine göre uyku süresi)
+        elapsed = time.time() - step_start_time
+        if elapsed < dt_mpc:
+            time.sleep(dt_mpc - elapsed)
 
-
-
-
-
+# Grafikleri Çizdir
 plt.figure(figsize=(12, 6))
-
-# X Axis
 plt.subplot(2, 1, 1)
-#plt.plot(log_t, log_planned_com_x, label="Planned CoM X (MPC)", linestyle="--", color="blue")
 plt.plot(log_t, log_real_com_x, label="Measured CoM X (Sensor)", linewidth=2, color="red")
 plt.axvline(x=6.0, color='black', linestyle=':', label='Push')
 plt.title("X axis: CoM Trajectory (Forward)")
@@ -184,12 +196,10 @@ plt.ylabel("Position (m)")
 plt.legend()
 plt.grid(True)
 
-# Y Axis
 plt.subplot(2, 1, 2)
-#plt.plot(log_t, log_planned_com_y, label="Planned CoM Y (MPC)", linestyle="--", color="blue")
-plt.plot(log_t, log_real_com_y, label="Measured CoM Y ", linewidth=2, color="red")
+plt.plot(log_t, log_real_com_y, label="Measured CoM Y", linewidth=2, color="red")
 plt.axvline(x=6.0, color='black', linestyle=':', label='Push')
-plt.title("Y axis: CoM Trajectory  (Lateral)")
+plt.title("Y axis: CoM Trajectory (Lateral)")
 plt.xlabel("Time (s)")
 plt.ylabel("Position (m)")
 plt.legend()
