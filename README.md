@@ -29,7 +29,7 @@ Control Theory: ZMP Preview Control (LQR/MPC)
 
 Kinematics: 12-DOF Inverse Kinematics (IK)
 ### Kinematic Configuration
-![GO2B Robot Mechanism](assets/structure)
+![GO2B Robot Mechanism](assets/structrue.jpg)
 
 Interfacing: Python (Simulation & Control Loops) / MATLAB (Trajectory Optimization)
 
